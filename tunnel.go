@@ -2,22 +2,32 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
 	"net"
-	// "net/url"
+	"net/url"
 	// "github.com/gorilla/websocket"
 )
 
-func handleConnection(from net.Conn) {
+func handleConnection(from net.Conn, u string) {
+
 	defer from.Close()
 	fmt.Println("New connection accepted", from.RemoteAddr())
-	//to, err := net.Dial("tcp", *remoteAddr) - TODO dial websocket
-	// if err != nil {
-		// handle error
-	// }
-	// run copy
+	c, _, err := websocket.DefaultDialer.Dial(u, nil)
+	if err != nil {
+		log.Fatal("dial:", err)
+	}
+	defer c.Close()
+
+	done := make(chan error)
+	defer close(done)
+	// make 2 goroutines, one for tcp reading, one for ws reading
+	// both write to done on exit/error
+
+	err1, err2 := <- done, <- done
+
 }
 
 func main() {
@@ -29,16 +39,20 @@ func main() {
 	wsAddr := flag.String("ws", "ws://localhost:1080/ws", "websocket URL")
 
 	flag.Parse()
-	fmt.Println("Local port", *localPort)
-	fmt.Println("Remote address", *remoteAddr)
-	fmt.Println("WebSocket URL", *wsAddr)
+	log.Println("Local port", *localPort)
+	log.Println("Remote address", *remoteAddr)
 
+	u, err := url.Parse(*wsAddr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println("WebSocket URL", u)
 
+	
 	signal.Notify(interrupt, syscall.SIGINT)
 	go func() {
 		sig := <- interrupt
-		fmt.Println()
-		fmt.Println(sig)
+		log.Println(sig)
 		done <- true
 	}()
 
@@ -46,7 +60,7 @@ func main() {
 	ln, err := net.Listen("tcp", "127.0.0.1:" + fmt.Sprintf("%d", *localPort))
 	defer ln.Close()
 	if err != nil {
-		fmt.Println("Listening error", err)
+		log.Println(err)
 		return
 	}
 	
@@ -56,17 +70,17 @@ func main() {
 			conn, err := ln.Accept()
 			if err != nil {
 				// handle error
-				fmt.Println("Listener:", err)
+				log.Println(err)
 				return
 			}
 
-			go handleConnection(conn)
+			go handleConnection(conn, *wsAddr + "/?dst=" + remoteAddr)
 		}
 	}()
 
 
 
-	fmt.Println("Ready")
+	log.Println("Ready")
 	<- done
-	fmt.Println("Done")
+	log.Println("Done")
 }
