@@ -14,9 +14,17 @@ import (
 	"github.com/google/uuid"
 )
 
+func sendWsClose(ws websocket.Conn) error {
+	err := ws.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+	if err != nil {
+		log.Println("ws sendClose error: ", err)
+	}
+	return err
+}
+
 func handleConnection(tcp net.Conn, u string) {
-	defer tcp.Close()
-	fmt.Println("New connection accepted", tcp.RemoteAddr())
+	addr := tcp.RemoteAddr()
+	log.Println("New connection accepted", addr)
 
 	header := make(http.Header)
 	header["x-wstclient"] = []string{uuid.New().String()}
@@ -27,61 +35,71 @@ func handleConnection(tcp net.Conn, u string) {
 		log.Println("dial:", error)
 		return
 	}
-	defer ws.Close()
 
-	done := make(chan interface{})
-	defer close(done)
+	doneTcp := make(chan interface{})
+	doneWs := make(chan interface{})
 	// make 2 goroutines, one for tcp reading, one for ws reading
 	// both write to done on exit/error
 	go func() {
+		defer log.Println(addr, "Finished ws read")
 		for {
 			_, bytes, err := ws.ReadMessage()
 			if err != nil {
-				log.Println("ws read error:", err)
-				done <- err
+				log.Println(addr, "ws read:", err)
+				doneWs <- err
 				return
 			}
 			n, err := tcp.Write(bytes)
 			if err != nil {
-				log.Println("tcp write error:", err)
-				done <- err
+				log.Println(addr, "tcp write:", err)
+				doneWs <- err
 				return
 			}
 			if n != len(bytes) {
 				err = errors.New("Failed to write all data")
-				log.Println("tcp rwite error:", err)
-				done <- err
+				log.Println(addr, "tcp write:", err)
+				doneWs <- err
 				return
 			}
 		}
 	}()
 
 	go func() {
+		defer log.Println(addr, "Finished tcp read")
 		bytes := make([]byte, 2048)
 		for {
 			n, err := tcp.Read(bytes)
 			if err != nil {
-				log.Println("tcp read error:", err)
-				done <- err
+				log.Println(addr, "tcp read:", err)
+				doneTcp <- err
 				return
 			}
 			err = ws.WriteMessage(websocket.BinaryMessage, bytes[:n])
 			if err != nil {
-				log.Println("ws write error:", err)
-				done <- err
+				log.Println(addr, "ws write:", err)
+				doneTcp <- err
 				return
 			}
 		}
 	}()
-	err1, err2 := <- done, <- done
+	
+	for i := 0; i < 2; i++ {
+		select {
+		case err1 := <- doneTcp:
+			log.Println(addr, "tcp reader: ", err1)
+			_ = sendWsClose(*ws)
+			ws.Close()
+		case err2 := <- doneWs:
+			log.Println(addr, "ws reader: ", err2)
+			tcp.Close()
+		}
+	}
 	log.Println("Done with", tcp.RemoteAddr())
-	log.Println(err1, err2)
-	// run deferred closes
 }
 
 func main() {
 	interrupt := make(chan os.Signal, 1)
-	done := make(chan bool, 1)
+	done := make(chan bool)
 
 	localPort := flag.Int("lport", 1488, "local port to listen")
 	remoteAddr := flag.String("remote", "localhost:1488", "remote address:port to connect to")
