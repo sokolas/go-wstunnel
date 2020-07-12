@@ -101,8 +101,8 @@ func main() {
 	interrupt := make(chan os.Signal, 1)
 	done := make(chan bool)
 
-	localPort := flag.Int("lport", 1488, "local port to listen")
-	remoteAddr := flag.String("remote", "localhost:1488", "remote address:port to connect to")
+	localPort := flag.Int("lport", 1489, "local port to listen")
+	remoteAddr := flag.String("remote", "localhost:1489", "remote address:port to connect to")
 	wsAddr := flag.String("ws", "ws://localhost:8000/ws", "websocket URL")
 
 	flag.Parse()
